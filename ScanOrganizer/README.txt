@@ -42,13 +42,14 @@ it's ScanOrganizer.ini — open it in Notepad, edit the paths after each
 
 - Only PDFs sitting loose in the watched folder get moved (not ones already
   inside subfolders).
-- It checks for new PDFs about once a minute.
-- **A new scan usually takes about 2–3 minutes to move**, not instantly.
-  It deliberately waits until the file's size has stopped changing across
-  two checks in a row (three checks total, roughly one minute apart) before
-  touching it — this avoids grabbing a scan while it's still being written,
-  which could corrupt it. Large multi-page scans on a slow scanner may take
-  a little longer still, since any change in size resets the wait.
+- It checks the watched folder once per second.
+- **A finished scan is filed within a few seconds**, not instantly. It
+  deliberately waits until the file's size has stopped changing across two
+  checks in a row before touching it — this avoids grabbing a scan while
+  it's still being written, which could corrupt it. Large multi-page scans
+  on a slow scanner may take a little longer, since any change in size
+  resets the wait — but as soon as the scan software finishes writing the
+  file, it gets filed within a couple of seconds.
 - If two files end up with the same name on the same day, the second one is
   saved as `filename_1.pdf` instead of overwriting the first.
 - A log file, **ScanOrganizer.log**, appears next to the script — open it in

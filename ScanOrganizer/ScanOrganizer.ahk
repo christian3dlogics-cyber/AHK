@@ -14,9 +14,9 @@ ProcessSetPriority "Below Normal"
 
 INI_FILE := A_ScriptDir "\ScanOrganizer.ini"
 LOG_FILE := A_ScriptDir "\ScanOrganizer.log"
-POLL_INTERVAL_MS := 60000
-SETTLE_MS := 5000       ; skip files modified in the last N ms (still being written)
-MIN_STABLE_CHECKS := 2  ; file size must be unchanged across this many consecutive polls before moving
+POLL_INTERVAL_MS := 1000  ; check for new/finished scans every second
+SETTLE_MS := 2000         ; minimum time a file must sit unchanged before it's considered done
+MIN_STABLE_CHECKS := 2    ; file size must be unchanged across this many consecutive polls before moving
 
 ; This script runs headless (Task Scheduler, no one watching a screen).
 ; It must NEVER block on a MsgBox — a stuck dialog with no one to click it
@@ -149,10 +149,10 @@ ProcessOneFile(fullPath, fileName, seenThisPoll) {
 ; since it was first seen. This is far more reliable than a single
 ; time-since-modified check for scanners that write slowly or in bursts.
 ;
-; Note: this costs at least 3 poll cycles end-to-end (the poll that first
-; sees the file, plus MIN_STABLE_CHECKS more to confirm the size held) —
-; with the default 60s interval and MIN_STABLE_CHECKS=2, that's a real
-; ~2-3 minutes before a scan is filed, not 1-2.
+; This costs at least 3 poll cycles end-to-end (the poll that first sees
+; the file, plus MIN_STABLE_CHECKS more to confirm the size held) — with
+; the default 1s interval and MIN_STABLE_CHECKS=2, a scan is filed within
+; a few seconds of finishing, while still never grabbing a file mid-write.
 IsFileStable(filePath, minAgeMs) {
     global g_PendingFiles, MIN_STABLE_CHECKS
 

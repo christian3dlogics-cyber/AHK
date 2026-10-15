@@ -430,7 +430,7 @@ def test_T1b_cached_values_are_real_recalc():
 
 def test_T2_v19_totals_parity():
     cur = current()
-    c, wv, data = cur["calc"], cur["wv"], cur["data"]
+    c, wv = cur["calc"], cur["wv"]
     bad, n = [], 0
     for m in bt.MACHINES:
         ws = wv[m]
@@ -676,6 +676,10 @@ def test_T5_differential_fuzz():
             rows += len(data["machines"][m])
             truncated += n < FUZZ_NROWS
             bad += [("case %d" % k,) + x for x in b]
+            prev = {"k1": "", "k2": ""}
+            for o in oracles[m][0]:     # rows where both slots changed bucket on the same row
+                stats["swaps_both"] += o["k1"] != prev["k1"] and o["k2"] != prev["k2"]
+                prev = o
             for _, kind, t in oracles[m][2]:
                 stats["overdraw"] += t.startswith("Overdraw")
                 stats["funnel_full"] += t.startswith("Funnel full")

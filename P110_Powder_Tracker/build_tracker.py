@@ -12,7 +12,6 @@ Design (spec §2.3): every value is computed once per row in helper columns S on
 Compatible with Excel 2016+ / LibreOffice 7+: no LET/LAMBDA/XLOOKUP/FILTER/TEXTJOIN/IFS/MAXIFS,
 no dynamic arrays, no volatile functions, no macros.
 """
-import datetime
 import functools
 import re
 import sys
@@ -22,7 +21,6 @@ from openpyxl.formatting.rule import FormulaRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Protection, Side
 from openpyxl.utils import get_column_letter as CL
 from openpyxl.worksheet.datavalidation import DataValidation
-from openpyxl.workbook.defined_name import DefinedName  # noqa: F401  (kept for readers of the code)
 
 FIRST = 5                       # first data row on the machine sheets
 MACHINES = ("Old P110", "New P110")
@@ -376,7 +374,6 @@ def row_formulas(r, last):
     for name, _, tpl in L.helpers:
         c = L.col[name]
         if name.startswith("LED"):
-            k = int(name[3:])
             prev = "%s%d" % (c, r - 1) if r > FIRST else "%s$3" % c
             f[c] = "=%s-SUMIF(%s%d:%s%d,%s$4,%s%d:%s%d)" % (
                 prev, L.col["DK1"], r, L.col["DK6"], r, c, L.col["DQ1"], r, L.col["DQ6"], r)

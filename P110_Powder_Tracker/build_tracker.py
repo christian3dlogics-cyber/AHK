@@ -485,6 +485,8 @@ def build_machine(ws, name, nrows, rows):
               "L": 16, "M": 16, "N": 16, "O": 16, "P": 22, "Q": 34, "R": 44}
     for c, w in widths.items():
         ws.column_dimensions[c].width = w
+    cells = ["_xlfn.ISFORMULA(%s%d)" % (CL(c), rr) for c in range(L.led_first, L.led_last + 1) for rr in (3, 4)]
+    ws["%s1" % HDR_INT_COL] = "=IF(AND(%s),0,1)+IF(AND(%s),0,1)" % (",".join(cells[:72]), ",".join(cells[72:]))
     ws.freeze_panes = "A5"
     ws.column_dimensions.group(hcol0, hcol1, hidden=True, outline_level=1)
     ws.sheet_properties.outlinePr.summaryRight = False
@@ -740,6 +742,7 @@ def build_dashboard(ws, nrows):
 
 
 CHECK_ROW0 = 6
+HDR_INT_COL = "S"   # machine sheets: S1 = ledger header / opening-balance integrity (0 = intact)
 
 
 def checks_list(nrows):
@@ -760,11 +763,8 @@ def checks_list(nrows):
                          .format(rng=rng, sh=sheet, off=FIRST - 1, nxt=first))
             out.append((sev, label, "=" + cnt, "=" + first, fix))
     hdr_bad = "+".join("SUMPRODUCT(--NOT(EXACT('%s'!%s,Lists!$F$2:$%s$2)))" % (s, L.hdr, CL(5 + 72)) for s in MACHINES)
-    hdr_int_parts = []
-    for s in MACHINES:
-        cells = ["_xlfn.ISFORMULA('%s'!%s%d)" % (s, CL(c), rr) for c in range(L.led_first, L.led_last + 1) for rr in (3, 4)]
-        hdr_int_parts.append("IF(AND(%s),0,1)+IF(AND(%s),0,1)" % (",".join(cells[:72]), ",".join(cells[72:])))
-    hdr_int = "+".join(hdr_int_parts)
+    # per-sheet helper S1 does the 144 ISFORMULA tests (a cross-sheet version exceeds Excel's 8,192-char formula limit)
+    hdr_int = "+".join("N('%s'!$%s$1)+IF(_xlfn.ISFORMULA('%s'!$%s$1),0,1)" % (s, HDR_INT_COL, s, HDR_INT_COL) for s in MACHINES)
     dash_cells = ["Machine Dashboard!A3"] + ["Machine Dashboard!B%d" % r for r in list(range(5, 13)) + list(range(15, 23))]
     dash_int = "IF(AND(%s),0,1)" % ",".join("_xlfn.ISFORMULA('%s'!%s)" % tuple(c.split("!")) for c in dash_cells)
     rowsused = "MAX(0,MAX(%s)-%d)" % (",".join("'%s'!$%s$%d:$%s$%d" % (s, L.col["aRow"], FIRST, L.col["aRow"], last)

@@ -8,6 +8,7 @@ calculateAll) and reads the computed values back. The oracle is ref_model.py.
     (pytest-compatible too: set P110_V19=<v19.xlsx> and run pytest tests/test_tracker.py)
 """
 import datetime
+import html
 import json
 import os
 import random
@@ -826,6 +827,8 @@ def test_T7_bad_input():
          "ERROR: Formula overwritten", "Formula overwritten on a machine-sheet row", True),
         ("typed constant over Bucket Status D", base, unprotect_and(lambda wb: wb["Bucket Status"].__setitem__("D12", 5.09)), None, None,
          None, "Bucket Status formula overwritten (D/E/F/H/I or hidden helpers)", True),
+        ("typed constant over ledger header", base, unprotect_and(lambda wb: wb["Old P110"].__setitem__("%s4" % bt.L.col["LED0"], "M1A-")), None, None,
+         None, "Ledger header / opening-balance formulas overwritten", True),
         ("key not filled", _set(base, "New P110", 1, F="M9", G="H"), None, "New P110", 6, "ERROR: M9H- is not in Bucket Status or is Not filled", "Bucket not in Bucket Status / Not filled", False),
         ("loaded before fill date", _set(base, "New P110", 1, F="M9", G="G"), None, "New P110", 6, "ERROR: M9G- loaded before its Date filled", "Bucket loaded before its Date filled (or no Date filled)", False),
         ("reload bucket in funnel", _set(_set(base, "Old P110", 3, F="M1", G="D", H=0.5), "Old P110", 4, F="M1", G="B"), None, "Old P110", 9,
@@ -992,6 +995,28 @@ BANNED = ["LET", "LAMBDA", "XLOOKUP", "XMATCH", "FILTER", "SORT", "SORTBY", "UNI
           "CELL", "INFO"]
 
 
+def excel_limit_violations(f):
+    """Excel hard limits: formula <= 8,192 chars, <= 64 nesting levels, <= 255 arguments per function."""
+    out = []
+    if len(f) > 8192:
+        out.append("length %d > 8192" % len(f))
+    g = re.sub(r'"[^"]*"', '""', f)
+    stack, depth_max = [], 0
+    for ch in g:
+        if ch == "(":
+            stack.append(1)
+            depth_max = max(depth_max, len(stack))
+        elif ch == ")":
+            n = stack.pop()
+            if n > 255:
+                out.append("%d arguments > 255" % n)
+        elif ch == "," and stack:
+            stack[-1] += 1
+    if depth_max > 64:
+        out.append("nesting %d > 64" % depth_max)
+    return out
+
+
 def test_T10_compatibility():
     path = CFG["deliverable"]
     z = zipfile.ZipFile(path)
@@ -1005,6 +1030,8 @@ def test_T10_compatibility():
                 bad.append((n, "array / dynamic-array formula"))
             for f in re.findall(r"<f>(.*?)</f>", x, re.S):
                 nform += 1
+                for v in excel_limit_violations(html.unescape(f)):
+                    bad.append((n, v, html.unescape(f)[:60]))
                 f2 = re.sub(r'"[^"]*"', '""', f.replace("&quot;", '"'))
                 fns.update(re.findall(r"([A-Za-z_][A-Za-z0-9_.]*)\(", f2))
     used = sorted(fns)
@@ -1060,7 +1087,7 @@ DESCR = {
     "T7": "Bad input raises the right ERROR/WARN without disturbing other rows",
     "T8": "Edge cases",
     "T9": "Mass balance (sum I = sum of draws + unsupplied usage; Bucket Status D = draws; funnel lots in = out + left)",
-    "T10": "Compatibility (banned/volatile functions, macros, arrays, error cells)",
+    "T10": "Compatibility (banned/volatile functions, macros, arrays, error cells, Excel formula limits: 8,192 chars / 64 levels / 255 args)",
     "T11": "Performance (full recalc, 1,000 rows on both sheets)",
 }
 

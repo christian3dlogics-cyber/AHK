@@ -148,8 +148,10 @@ def lot_of(data, key):
     return mg.lot_of(data, key)
 
 
-def expected_R(i, o, issues_row, raw, extra_warns=()):
+def expected_R(i, o, issues_row, raw, extra_warns=(), extra_errs=()):
     errs = [t for _, kind, t in issues_row if kind == "ERROR"]
+    if not errs and extra_errs:
+        return "ERROR: " + extra_errs[0]
     warns = [t for _, kind, t in issues_row if kind == "WARN"]
     if errs:
         lot5 = [t for t in errs if t.startswith("More than")]
@@ -192,7 +194,7 @@ def compare_machine(c, sheet, data, nrows, oracle, check_R=True, stop_at_lot5=Tr
         if lot5:
             stop = min(lot5)
     cum = {}
-    seen, last_date = set(), None
+    seen, last_date, prev_min = set(), None, 0.0
     for i in range(stop):
         o, r = out[i], bt.FIRST + i
         row_draws = [(b, a, s) for ii, b, a, s in draws if ii == i]
@@ -281,7 +283,10 @@ def compare_machine(c, sheet, data, nrows, oracle, check_R=True, stop_at_lot5=Tr
                 if norm(rows[i]["build"]) in seen:
                     extra.append("Duplicate Build # on this sheet")
                 seen.add(norm(rows[i]["build"]))
-            chk("R", c.v(sheet, "R%d" % r), expected_R(i, o, iss, rows[i], extra))
+            cur_min = min(full.get(key, 0.0) - cum.get(key, 0.0) for key in bt.KEYS)
+            led_err = ["Ledger negative: a bucket's remaining went below 0"] if cur_min < -0.0005 <= prev_min else []
+            prev_min = cur_min
+            chk("R", c.v(sheet, "R%d" % r), expected_R(i, o, iss, rows[i], extra, led_err))
     return stop, bad
 
 
@@ -607,9 +612,9 @@ def gen_seq(rng, n, cycles):
             c = b = None
             if a == "load":
                 c, b = "M%d" % rng.choice(cycles), rng.choice("ABCDEFGH")
-            elif a == "letter":
+            elif a == "letter" and cyc[s]:
                 b = rng.choice("ABCDEFGH")
-            elif a == "cycle":
+            elif a == "cycle" and bkt[s]:
                 c = "M%d" % rng.choice(cycles)
             elif a == "empty":
                 c = "EMPTY"
@@ -940,7 +945,7 @@ def _mass_balance(c, nrows, label):
     drawn = {}
     for m in bt.MACHINES:
         si = sum(c.v(m, "I%d" % r) for r in range(bt.FIRST, last + 1) if isinstance(c.v(m, "I%d" % r), float))
-        sd = 0.0
+        sd = sum(c.m(m, "noB", r) for r in range(bt.FIRST, last + 1))
         for r in range(bt.FIRST, last + 1):
             for j in range(1, 7):
                 k, q = c.m(m, "DK%d" % j, r), c.m(m, "DQ%d" % j, r)
@@ -948,7 +953,7 @@ def _mass_balance(c, nrows, label):
                     sd += q
                     drawn[k] = drawn.get(k, 0.0) + q
         if abs(si - sd) > 1e-9 * max(1, nrows / 100):
-            bad.append((label, m, "sum I vs draws", si, sd))
+            bad.append((label, m, "sum I vs draws + unsupplied", si, sd))
         ev, ids = funnel_events(c, m, nrows)
         for e in ev:
             used = sum(a for _, a in e["used"])
@@ -1050,7 +1055,7 @@ DESCR = {
     "T6": "Slot symmetry (mirrored fuzz + targeted cases)",
     "T7": "Bad input raises the right ERROR/WARN without disturbing other rows",
     "T8": "Edge cases",
-    "T9": "Mass balance",
+    "T9": "Mass balance (sum I = sum of draws + unsupplied usage; Bucket Status D = draws; funnel lots in = out + left)",
     "T10": "Compatibility (banned/volatile functions, macros, arrays, error cells)",
     "T11": "Performance (full recalc, 1,000 rows on both sheets)",
 }

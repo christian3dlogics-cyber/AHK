@@ -10,6 +10,7 @@ calculateAll) and reads the computed values back. The oracle is ref_model.py.
 import datetime
 import html
 import json
+import math
 import os
 import random
 import re
@@ -94,6 +95,24 @@ def fmt2(x):
     """What TEXT(x,"0.00") shows: 15 significant digits, then round half away from zero to 2 decimals."""
     from decimal import Decimal, ROUND_HALF_UP
     return str(Decimal("%.15g" % x).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def kg_text_ok(got, parts):
+    """got must equal the concatenation of parts, where a part is a literal str or a kg float rendered as 0.00.
+    A value within 1e-7 of a half-cent tie may render either way (TEXT tie-breaking on binary floats differs
+    between Excel, LibreOffice and Python); every other value must render exactly."""
+    pat = "".join(re.escape(p) if isinstance(p, str) else r"(-?\d+\.\d\d)" for p in parts)
+    m = re.fullmatch(pat, got)
+    if not m:
+        return False
+    for shown, x in zip(m.groups(), [p for p in parts if not isinstance(p, str)]):
+        shown = float(shown)
+        if shown == float(fmt2(x)) or (shown == 0.0 and abs(x) < 0.005):
+            continue
+        if abs(abs(x * 100 - math.floor(x * 100)) - 0.5) < 1e-5 and abs(shown - x) <= 0.005 + 1e-9:
+            continue
+        return False
+    return True
 
 
 def num(x):
@@ -241,21 +260,22 @@ def compare_machine(c, sheet, data, nrows, oracle, check_R=True, stop_at_lot5=Tr
         od = sorted((b, round(a, 9), s) for b, a, s in row_draws if a > EPS)
         if len(wd) != len(od) or any(x[0] != y[0] or x[2] != y[2] or abs(x[1] - y[1]) > 1e-8 for x, y in zip(wd, od)):
             bad.append((sheet, r, "draws", wd, od))
-        # visible text columns
-        kgtxt = fmt2
-        k_exp = "  +  ".join("%s kg %s (funnel)" % (kgtxt(a), k) for k, a in fu)
-        chk("K", c.v(sheet, "K%d" % r), k_exp)
+        # visible text columns (kg shown as 0.00)
+        def chk_txt(col, parts):
+            got = c.v(sheet, "%s%d" % (col, r))
+            if not kg_text_ok(got.replace("-0.00", "0.00"), parts):
+                bad.append((sheet, r, col, got, parts))
+        k_parts = []
+        for n_, (k, a) in enumerate(fu):
+            k_parts += (["  +  "] if n_ else []) + [a, " kg %s (funnel)" % k]
+        chk_txt("K", k_parts)
         for s, col in (("1", "L"), ("2", "M")):
             a = [x for b, x, so in row_draws if so == "slot" + s]
-            chk(col, c.v(sheet, "%s%d" % (col, r)), ("%s kg %s" % (kgtxt(a[0]), o["k" + s])) if a else "")
+            chk_txt(col, [a[0], " kg %s" % o["k" + s]] if a else [])
         for s, col in (("1", "N"), ("2", "O")):
             lf = o["slot%s_left" % s]
-            exp = ""
-            if o["active"] and o["k" + s]:
-                exp = "%s kg %s" % (kgtxt(0.0 if abs(lf) < 1e-9 else lf), o["k" + s])
-            got = c.v(sheet, "%s%d" % (col, r))
-            if got != exp and not (got.replace("-0.00", "0.00") == exp.replace("-0.00", "0.00")):
-                bad.append((sheet, r, col, got, exp))
+            exp = [0.0 if abs(lf) < 1e-9 else lf, " kg %s" % o["k" + s]] if o["active"] and o["k" + s] else []
+            chk_txt(col, exp)
         # Q: funnel FIFO, then longest-loaded bucket, then the other
         fun_keys = [k for k, a in fu]
         sl = [(order[i][s], o["k" + s], s) for s in "12" if any(so == "slot" + s and a > EPS for b, a, so in row_draws)]
@@ -425,6 +445,8 @@ def test_T1b_cached_values_are_real_recalc():
                     cached = "" if cached is None else cached
                     if isinstance(cached, datetime.datetime):
                         cached = (cached - datetime.datetime(1899, 12, 30)).total_seconds() / 86400.0
+                    elif isinstance(cached, datetime.time):    # serial < 1 in a date-formatted cell (e.g. 0)
+                        cached = (cached.hour * 3600 + cached.minute * 60 + cached.second) / 86400.0
                     if isinstance(fresh, float) and isinstance(cached, (int, float)):
                         if abs(fresh - cached) > 1e-12:
                             bad.append((ws.title, cell.coordinate, cached, fresh))

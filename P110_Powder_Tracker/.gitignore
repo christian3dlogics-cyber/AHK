@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+_v20_unrecalculated.xlsx
+P110_Powder_Tracker_v20_template.xlsx
+.~lock.*#

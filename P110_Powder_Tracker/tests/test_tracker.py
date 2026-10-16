@@ -90,6 +90,12 @@ def build_calc(data, nrows, name="wb", mutate=None):
     return c
 
 
+def fmt2(x):
+    """What TEXT(x,"0.00") shows: 15 significant digits, then round half away from zero to 2 decimals."""
+    from decimal import Decimal, ROUND_HALF_UP
+    return str(Decimal("%.15g" % x).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
 def num(x):
     return x if isinstance(x, float) else None
 
@@ -236,8 +242,7 @@ def compare_machine(c, sheet, data, nrows, oracle, check_R=True, stop_at_lot5=Tr
         if len(wd) != len(od) or any(x[0] != y[0] or x[2] != y[2] or abs(x[1] - y[1]) > 1e-8 for x, y in zip(wd, od)):
             bad.append((sheet, r, "draws", wd, od))
         # visible text columns
-        def kgtxt(a):
-            return "%.3f" % (round(a + 1e-12, 3) if a >= 0 else a)
+        kgtxt = fmt2
         k_exp = "  +  ".join("%s kg %s (funnel)" % (kgtxt(a), k) for k, a in fu)
         chk("K", c.v(sheet, "K%d" % r), k_exp)
         for s, col in (("1", "L"), ("2", "M")):
@@ -249,7 +254,7 @@ def compare_machine(c, sheet, data, nrows, oracle, check_R=True, stop_at_lot5=Tr
             if o["active"] and o["k" + s]:
                 exp = "%s kg %s" % (kgtxt(0.0 if abs(lf) < 1e-9 else lf), o["k" + s])
             got = c.v(sheet, "%s%d" % (col, r))
-            if got != exp and not (got.replace("-0.000", "0.000") == exp.replace("-0.000", "0.000")):
+            if got != exp and not (got.replace("-0.00", "0.00") == exp.replace("-0.00", "0.00")):
                 bad.append((sheet, r, col, got, exp))
         # Q: funnel FIFO, then longest-loaded bucket, then the other
         fun_keys = [k for k, a in fu]
@@ -341,7 +346,7 @@ def dashboard_expected(data, nrows, oracles):
         o = out[i]
         fl = final_funnel(o) if o["total"] is not None else [list(x) for x in o["funnel_before"]]
         def kg(x):
-            return "%.3f" % (0.0 if abs(x) < 1e-9 else x)
+            return fmt2(0.0 if abs(x) < 1e-9 else x)
         exp[m] = {
             "Last build #": str(rows[i]["build"]),
             "Powder used (this build)": (kg(o["total"]) + " kg") if o["total"] is not None else "— (usage not entered)",
@@ -512,13 +517,13 @@ def test_T3_expected_values():
     dash = read_dashboard(c)
     exp = {
         "Old P110": {"Last build #": "B-2792(3rd)", "Print date": 46309.0, "Powder used (this build)": "— (usage not entered)",
-                     "LOT#s used": "—", "Slot 1 bucket + remaining": "4.980 kg M4C-",
-                     "Slot 2 bucket + remaining": "3.680 kg M4B-", "Funnel contents": "0.000 kg",
-                     "Powder on machine": "8.660 kg"},
-        "New P110": {"Last build #": "B-2796", "Print date": 46309.0, "Powder used (this build)": "3.750 kg",
-                     "LOT#s used": "M4E-20261009, M4F-20261009", "Slot 1 bucket + remaining": "0.000 kg M4E-",
-                     "Slot 2 bucket + remaining": "4.150 kg M4F-", "Funnel contents": "0.000 kg",
-                     "Powder on machine": "4.150 kg"},
+                     "LOT#s used": "—", "Slot 1 bucket + remaining": "4.98 kg M4C-",
+                     "Slot 2 bucket + remaining": "3.68 kg M4B-", "Funnel contents": "0.00 kg",
+                     "Powder on machine": "8.66 kg"},
+        "New P110": {"Last build #": "B-2796", "Print date": 46309.0, "Powder used (this build)": "3.75 kg",
+                     "LOT#s used": "M4E-20261009, M4F-20261009", "Slot 1 bucket + remaining": "0.00 kg M4E-",
+                     "Slot 2 bucket + remaining": "4.15 kg M4F-", "Funnel contents": "0.00 kg",
+                     "Powder on machine": "4.15 kg"},
     }
     assert datetime.date(1899, 12, 30) + datetime.timedelta(days=46309) == datetime.date(2026, 10, 14)
     for m in exp:
@@ -906,7 +911,7 @@ def test_T8_edge_cases():
     rows = [R("b1", 0, "M1", "A", "M1", "B", 2.0), R("b2", 1, "M1", "C", h=1.0), R("b3", 2, h=4.0)]
     gapped = [rows[0], dict(blank), dict(blank), rows[1], dict(blank), rows[2]]
     A, G = build_calc(mk(rows), 12, "t8"), build_calc(mk(gapped), 12, "t8")
-    checks["first row computes"] = A.v("Old P110", "I5") == 2.0 and A.v("Old P110", "L5") == "2.000 kg M1A-"
+    checks["first row computes"] = A.v("Old P110", "I5") == 2.0 and A.v("Old P110", "L5") == "2.00 kg M1A-"
     checks["blank gap rows carry state"] = all(A.v("Old P110", "%s%d" % (c, ra)) == G.v("Old P110", "%s%d" % (c, rg))
                                                for ra, rg in ((5, 5), (6, 8), (7, 10)) for c in "IJKLMNOQ") \
         and G.v("Old P110", "R6") == "" and G.v("Checks", "A3") == "ALL CHECKS PASS"
@@ -922,8 +927,8 @@ def test_T8_edge_cases():
     pend[1]["H"] = 1.25
     P2 = build_calc(mk(pend), 12, "t8")
     checks["pending then usage added"] = P1.v("Old P110", "R6") == "PENDING" and P1.v("Old P110", "I6") == "" \
-        and P1.v("Old P110", "N6") == "3.000 kg M1A-" and P2.v("Old P110", "R6") == "OK" \
-        and P2.v("Old P110", "L6") == "1.250 kg M1A-" and abs(P2.v("Old P110", "J6") - 1.75) < 1e-9
+        and P1.v("Old P110", "N6") == "3.00 kg M1A-" and P2.v("Old P110", "R6") == "OK" \
+        and P2.v("Old P110", "L6") == "1.25 kg M1A-" and abs(P2.v("Old P110", "J6") - 1.75) < 1e-9
     # usage exactly equal to what's available -> J = 0, no error
     ex = [R("b1", 0, "M1", "A", h=2.0), R("b2", 1, h=3.0)]
     E = build_calc(mk(ex), 12, "t8")

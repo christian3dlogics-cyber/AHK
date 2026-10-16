@@ -17,7 +17,7 @@ import re
 import sys
 
 from openpyxl import Workbook
-from openpyxl.formatting.rule import FormulaRule
+from openpyxl.formatting.rule import DataBarRule, FormulaRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Protection, Side
 from openpyxl.utils import get_column_letter as CL
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -44,16 +44,29 @@ FILL = lambda c: PatternFill("solid", fgColor=c)  # noqa: E731
 P_BLUE, P_LIGHT, P_IN, P_OUT, P_J = FILL("2E75B6"), FILL("D9E1F2"), FILL("FFF2CC"), FILL("EDEDED"), FILL("EAF3DE")
 P_GREEN_T, P_KEY, P_GREY, P_PURPLE = FILL("375623"), FILL("BDD7EE"), FILL("404040"), FILL("7030A0")
 P_HELP = FILL("F2F2F2")
-THIN = Side(style="thin", color="BFBFBF")
+THIN = Side(style="thin", color="D0D0D0")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
 LEFT = Alignment(horizontal="left", vertical="center")
 LEFTW = Alignment(horizontal="left", vertical="top", wrap_text=True)
 RIGHT = Alignment(horizontal="right", vertical="center")
-KG = '0.000" kg"'
+KG = '0.00" kg"'   # display 2 decimals; values keep full precision
 DATE = "mm/dd/yyyy"
-RED, AMBER, GREEN = FILL("FFC7CE"), FILL("FFEB9C"), FILL("C6EFCE")
+# Conditional-format fills must set the background colour too: Excel reads bgColor for CF fills (LibreOffice reads either).
+CFILL = lambda c: PatternFill(fill_type="solid", start_color=c, end_color=c)  # noqa: E731
+RED, AMBER, GREEN = CFILL("FFC7CE"), CFILL("FFEB9C"), CFILL("C6EFCE")
+BLUE_CF, PALE_GREEN, PURPLE_CF = CFILL("DDEBF7"), CFILL("F0F8F1"), CFILL("E9E1F2")
 F_RED, F_AMBER, F_GREEN = Font(color="9C0006", bold=True), Font(color="9C5700", bold=True), Font(color="006100", bold=True)
+F_BLUE, F_PURPLE, F_MUTED = Font(color="1F4E79", bold=True), Font(color="5B2C83", bold=True), Font(color="548235")
+# Column-group theme for the machine sheets: (header fill, group-band fill, data-cell fill)
+THEME = {"in": ("2E75B6", "DDEBF7", "FFF2CC"), "res": ("548235", "E2EFDA", "F3F8EE"),
+         "src": ("C55A11", "FBE5D6", "FFF8F3"), "rem": ("2F5597", "D9E1F2", "F2F5FB"),
+         "tr": ("7030A0", "E9E1F2", "F8F5FB")}
+COL_GROUP = {c: "in" for c in "ABCDEFGHP"}
+COL_GROUP.update({"I": "res", "J": "res", "K": "src", "L": "src", "M": "src", "N": "rem", "O": "rem", "Q": "tr", "R": "tr"})
+MACHINE_COLOR = {"Old P110": "1F4E79", "New P110": "0B6A6A"}
+TAB_COLOR = {"Checks": "404040", "Old P110": "1F4E79", "New P110": "0B6A6A", "Bucket Status": "375623",
+             "Machine Dashboard": "7030A0", "Settings": "7F7F7F", "Change Log": "C55A11", "Paste Instructions": "A5A5A5"}
 
 
 def NORM(x):
@@ -88,12 +101,12 @@ VISIBLE = [
     ("I", "Total drawn (kg)", '=IF(@uOK=1,@H+IF(@nCln="Y",Settings!$B$4+Settings!$B$5,0),"")'),
     ("J", "Powder on machine after build (kg)", '=IF(@uOK=1,@mL,"")'),
     ("K", "Draw from funnel", "=MID(" + "&".join(
-        'IF(@tk%d>%s,"  +  "&TEXT(@tk%d,"0.000")&" kg "&@SK%d&" (funnel)","")' % (j, EPS, j, j) for j in range(1, 5))
+        'IF(@tk%d>%s,"  +  "&TEXT(@tk%d,"0.00")&" kg "&@SK%d&" (funnel)","")' % (j, EPS, j, j) for j in range(1, 5))
      + ",6,500)"),
-    ("L", "Draw from slot 1", '=IF(@d1>0,TEXT(@d1,"0.000")&" kg "&@K1,"")'),
-    ("M", "Draw from slot 2", '=IF(@d2>0,TEXT(@d2,"0.000")&" kg "&@K2,"")'),
-    ("N", "Slot 1 left", '=IF(AND(@act=1,@K1<>""),TEXT(IF(ABS(@lf1)<%s,0,@lf1),"0.000")&" kg "&@K1,"")' % EPS),
-    ("O", "Slot 2 left", '=IF(AND(@act=1,@K2<>""),TEXT(IF(ABS(@lf2)<%s,0,@lf2),"0.000")&" kg "&@K2,"")' % EPS),
+    ("L", "Draw from slot 1", '=IF(@d1>0,TEXT(@d1,"0.00")&" kg "&@K1,"")'),
+    ("M", "Draw from slot 2", '=IF(@d2>0,TEXT(@d2,"0.00")&" kg "&@K2,"")'),
+    ("N", "Slot 1 left", '=IF(AND(@act=1,@K1<>""),TEXT(IF(ABS(@lf1)<%s,0,@lf1),"0.00")&" kg "&@K1,"")' % EPS),
+    ("O", "Slot 2 left", '=IF(AND(@act=1,@K2<>""),TEXT(IF(ABS(@lf2)<%s,0,@lf2),"0.00")&" kg "&@K2,"")' % EPS),
     ("Q", "LOT#s used (auto)", "=MID(" + "&".join('IF(@DK%d<>"",", "&@DL%d,"")' % (j, j) for j in range(1, 5))
      + '&IF(@f1=1,IF(@DK5<>"",", "&@DL5,"")&IF(@DK6<>"",", "&@DL6,""),IF(@DK6<>"",", "&@DL6,"")&IF(@DK5<>"",", "&@DL5,"")),3,500)'),
     ("R", "Row check",
@@ -416,33 +429,37 @@ def _hdr(cell, text, fill=P_BLUE, font=F_HDR):
 
 def build_machine(ws, name, nrows, rows):
     last = FIRST + nrows - 1
-    _title(ws, "EOS P110 — %s Build Log" % name, 18)
+    _title(ws, "EOS P110 — %s Build Log" % name, 18, FILL(MACHINE_COLOR[name]), 16, 34)
     groups = [("A2:C2", "Build info"), ("D2:E2", "Slot 1 bucket"), ("F2:G2", "Slot 2 bucket"), ("H2:H2", "Usage"),
               ("I2:J2", "Result"), ("K2:M2", "Powder source (funnel FIFO → longest-loaded bucket → other)"),
               ("N2:O2", "Slot remaining"), ("P2:P2", "Notes"), ("Q2:R2", "Traceability / check")]
     for rng, text in groups:
         a, b = rng.split(":")
-        _hdr(ws[a], text, P_LIGHT, F_GRP)
+        hdr_fill, band, _ = THEME[COL_GROUP[a[0]]]
+        for col in range(ord(a[0]), ord(b[0]) + 1):
+            _hdr(ws["%s2" % chr(col)], text if chr(col) == a[0] else None, FILL(band),
+                 Font(name=ARIAL, size=9, bold=True, color=hdr_fill))
         if a != b:
             ws.merge_cells(rng)
+    ws.row_dimensions[2].height = 20
     hcol0, hcol1 = CL(19), CL(L.last_col)
     _hdr(ws["S2"], "Calculated detail (click + to expand)", P_LIGHT, F_GRP)
     ws.merge_cells("S2:%s2" % hcol1)
     # row 3 totals
-    _hdr(ws["A3"], "Totals", P_BLUE)
+    _hdr(ws["A3"], "Totals", FILL("44546A"))
     ws.merge_cells("A3:G3")
     for col, f in (("H", "=SUM(H%d:H%d)" % (FIRST, last)), ("I", "=SUM(I%d:I%d)" % (FIRST, last)),
                    ("K", "=SUM(%s%d:%s%d)" % (L.col["DQ1"], FIRST, L.col["DQ4"], last)),
                    ("L", "=SUM(%s%d:%s%d)" % (L.col["DQ5"], FIRST, L.col["DQ5"], last)),
                    ("M", "=SUM(%s%d:%s%d)" % (L.col["DQ6"], FIRST, L.col["DQ6"], last))):
         c = ws[col + "3"]
-        c.value, c.number_format, c.font, c.fill, c.border, c.alignment = f, KG, F_OUT, P_OUT, BORDER, RIGHT
+        c.value, c.number_format, c.font, c.fill, c.border, c.alignment = f, KG, F_BOLD, FILL(THEME[COL_GROUP[col]][1]), BORDER, RIGHT
     # row 4 headers
     heads = {"A": "Build #", "B": "Date", "C": "Cleaned Chamber?", "D": "Slot 1 Cycle", "E": "Slot 1 Bucket",
              "F": "Slot 2 Cycle", "G": "Slot 2 Bucket", "H": "Calc. usage (kg)", "P": "Notes"}
     heads.update({c: t for c, t, _ in VISIBLE})
     for c, t in heads.items():
-        _hdr(ws[c + "4"], t)
+        _hdr(ws[c + "4"], t, FILL(THEME[COL_GROUP[c]][0]))
     for name_, header, _ in L.helpers:
         c = L.col[name_]
         cell = ws["%s4" % c]
@@ -450,17 +467,22 @@ def build_machine(ws, name, nrows, rows):
             k = int(name_[3:])
             cell.value = "=%sA%d" % (BS, BS_FIRST + k)
             ws["%s3" % c] = "=N(%sB%d)" % (BS, BS_FIRST + k)
-            ws["%s3" % c].number_format = "0.000"
+            ws["%s3" % c].number_format = "0.00"
             ws["%s3" % c].font = F_HELP
         else:
             cell.value = header
         cell.font, cell.fill, cell.alignment, cell.border = F_HDR, P_GREY, CENTER, BORDER
     ws.row_dimensions[4].height = 39.75
-    # data rows
+    # data rows (kg helpers display to 3 decimals; values keep full precision - no rounding inside the chain)
     numfmt = {"H": KG, "I": KG, "J": KG, "B": DATE}
+    helper_fmt = {L.col[n]: "0.00" for n in KG_HELPERS}
+    helper_fmt.update({L.col["LED%d" % k]: "0.00" for k in range(72)})
+    helper_fmt[L.col["LBD"]] = DATE
     for r in range(FIRST, last + 1):
         for c, f in row_formulas(r, last).items():
             ws["%s%d" % (c, r)] = f
+            if c in helper_fmt:
+                ws["%s%d" % (c, r)].number_format = helper_fmt[c]
         for c in "ABCDEFGHP":
             cell = ws["%s%d" % (c, r)]
             cell.fill, cell.font, cell.border = P_IN, F_IN, BORDER
@@ -469,7 +491,8 @@ def build_machine(ws, name, nrows, rows):
                 cell.number_format = numfmt[c]
         for c in "IKLMNOQR":
             cell = ws["%s%d" % (c, r)]
-            cell.fill, cell.font, cell.border = P_OUT, F_OUT if c == "I" else F_TXT, BORDER
+            cell.fill, cell.border = FILL(THEME[COL_GROUP[c]][2]), BORDER
+            cell.font = F_OUT if c == "I" else (F_BOLD if c == "R" else F_TXT)
             if c == "I":
                 cell.number_format = KG
         ws["J%d" % r].fill, ws["J%d" % r].font, ws["J%d" % r].number_format = P_J, F_J, KG
@@ -496,6 +519,8 @@ def build_machine(ws, name, nrows, rows):
     for c in ("R", "A"):
         ws.conditional_formatting.add(rng(c), FormulaRule(formula=['LEFT($R%d,5)="ERROR"' % FIRST], fill=RED, font=F_RED, stopIfTrue=True))
         ws.conditional_formatting.add(rng(c), FormulaRule(formula=['LEFT($R%d,4)="WARN"' % FIRST], fill=AMBER, font=F_AMBER, stopIfTrue=True))
+    ws.conditional_formatting.add(rng("R"), FormulaRule(formula=['$R%d="PENDING"' % FIRST], fill=BLUE_CF, font=F_BLUE, stopIfTrue=True))
+    ws.conditional_formatting.add(rng("R"), FormulaRule(formula=['$R%d="OK"' % FIRST], fill=GREEN, font=F_GREEN, stopIfTrue=True))
     ws.conditional_formatting.add(rng("J"), FormulaRule(formula=["AND(ISNUMBER($J%d),$J%d<0)" % (FIRST, FIRST)], fill=RED, stopIfTrue=True))
     ws.conditional_formatting.add(rng("J"), FormulaRule(formula=["AND(ISNUMBER($J%d),$J%d<=Settings!$B$3)" % (FIRST, FIRST)], fill=AMBER, stopIfTrue=True))
     ws.conditional_formatting.add(rng("J"), FormulaRule(formula=["AND(ISNUMBER($J%d),$J%d>Settings!$B$3)" % (FIRST, FIRST)], fill=GREEN, stopIfTrue=True))
@@ -592,7 +617,8 @@ def build_bucket_status(ws, nrows, buckets):
         for col in "ABCDEFGHI":
             cell = ws["%s%d" % (col, r)]
             cell.border, cell.font = BORDER, F_TXT
-        ws["A%d" % r].fill, ws["A%d" % r].font = P_KEY, F_BOLD
+        ws["A%d" % r].fill = FILL("BDD7EE" if (k // 8) % 2 == 0 else "DDEBF7")    # band by mix cycle
+        ws["A%d" % r].font = F_BOLD
         for col in "BCG":
             ws["%s%d" % (col, r)].fill = P_IN
             ws["%s%d" % (col, r)].protection = Protection(locked=False)
@@ -604,7 +630,7 @@ def build_bucket_status(ws, nrows, buckets):
         ws["E%d" % r].number_format = KG
         ws["F%d" % r].font = F_BOLD
         for col in "JK":
-            ws["%s%d" % (col, r)].number_format = "0.000"
+            ws["%s%d" % (col, r)].number_format = "0.00"
     # legend (v19 rows 77-81)
     _hdr(ws["A77"], "Status key", P_GREY)
     ws.merge_cells("A77:I77")
@@ -616,8 +642,13 @@ def build_bucket_status(ws, nrows, buckets):
         ws["B%d" % r].font = F_TXT
         ws.merge_cells("B%d:I%d" % (r, r))
     rng_ = "F4:F75"
-    for txt, fill, font in (("OK", GREEN, F_GREEN), ("Low", AMBER, F_AMBER), ("Empty", RED, F_RED)):
+    for txt, fill, font in (("OK", GREEN, F_GREEN), ("Low", AMBER, F_AMBER), ("Empty", RED, F_RED),
+                            ("Not filled", CFILL("F2F2F2"), Font(color="808080", italic=True))):
         ws.conditional_formatting.add(rng_, FormulaRule(formula=['$F4="%s"' % txt], fill=fill, font=font))
+    ws.conditional_formatting.add("E4:E75", DataBarRule(start_type="num", start_value=0, end_type="num", end_value=6,
+                                                        color="63BE7B", showValue=True))
+    ws.conditional_formatting.add("I4:I75", FormulaRule(formula=['ISNUMBER(SEARCH("slot",$I4))'], fill=BLUE_CF, font=F_BLUE))
+    ws.conditional_formatting.add("I4:I75", FormulaRule(formula=['ISNUMBER(SEARCH("funnel",$I4))'], fill=PURPLE_CF, font=F_PURPLE))
     ws.conditional_formatting.add("B4:C75", FormulaRule(formula=["$Q4=1"], fill=RED, font=F_RED))
     for c, w in zip("ABCDEFGHI", (10, 16, 14, 18, 20, 12, 22, 18, 20)):
         ws.column_dimensions[c].width = w
@@ -638,7 +669,7 @@ def build_bucket_status(ws, nrows, buckets):
 
 
 def build_settings(ws, settings):
-    _title(ws, "Settings", 4, P_GREY, 13)
+    _title(ws, "Settings", 4, FILL("44546A"), 15, 34)
     rows = [(3, "Low powder warning (kg)", "Bucket remaining below this shows Low status"),
             (4, "Left roller capacity (kg)", "Powder to fill left dosing roller from empty"),
             (5, "Right roller capacity (kg)", "Powder to fill right dosing roller from empty"),
@@ -693,9 +724,11 @@ def build_dashboard(ws, nrows):
     ws["A2"].font = F_HELP
     ws.merge_cells("A2:F2")
     ws["A3"] = "=Checks!A3"
-    ws["A3"].font = Font(name=ARIAL, size=12, bold=True)
+    ws["A3"].font = Font(name=ARIAL, size=13, bold=True)
     ws["A3"].alignment = CENTER
     ws.merge_cells("A3:F3")
+    ws.row_dimensions[1].height = 34
+    ws.row_dimensions[3].height = 28
     ws.conditional_formatting.add("A3:F3", FormulaRule(formula=['$A$3="ALL CHECKS PASS"'], fill=GREEN, font=F_GREEN, stopIfTrue=True))
     ws.conditional_formatting.add("A3:F3", FormulaRule(formula=['LEFT($A$3,2)="0 "'], fill=AMBER, font=F_AMBER, stopIfTrue=True))
     ws.conditional_formatting.add("A3:F3", FormulaRule(formula=['$A$3<>""'], fill=RED, font=F_RED, stopIfTrue=True))
@@ -703,44 +736,68 @@ def build_dashboard(ws, nrows):
               "Slot 2 bucket + remaining", "Funnel contents", "Powder on machine"]
     for base, sheet in ((5, "Old P110"), (15, "New P110")):
         sh = "'%s'!" % sheet
-        _hdr(ws["A%d" % (base - 1)], sheet, P_BLUE, Font(name=ARIAL, size=14, bold=True, color="FFFFFF"))
+        mc = MACHINE_COLOR[sheet]
+        for col in "ABCDEF":
+            _hdr(ws["%s%d" % (col, base - 1)], sheet if col == "A" else None, FILL(mc),
+                 Font(name=ARIAL, size=14, bold=True, color="FFFFFF"))
         ws.merge_cells("A%d:F%d" % (base - 1, base - 1))
+        ws.row_dimensions[base - 1].height = 26
         hc = "$H$%d" % base
         ws[hc.replace("$", "")] = "=MAX(%s$%s$%d:$%s$%d)" % (sh, L.col["aRow"], FIRST, L.col["aRow"], last)
         IX = lambda col: "INDEX(%s$%s$1:$%s$%d,%s)" % (sh, col, col, last, hc)  # noqa: E731
         fk = [IX(L.col["FK%d" % j]) for j in range(1, 5)]
         fq = [IX(L.col["FQ%d" % j]) for j in range(1, 5)]
-        lots = "&".join('IF(%s<>"",%s%s&" "&TEXT(%s,"0.000")&" kg","")' % (fk[j], '", "&' if j else "", fk[j], fq[j])
+        lots = "&".join('IF(%s<>"",%s%s&" "&TEXT(%s,"0.00")&" kg","")' % (fk[j], '", "&' if j else "", fk[j], fq[j])
                         for j in range(4))
         fields = [
             '=IF(%s=0,"—",%s)' % (hc, IX("A")),
             '=IF(%s=0,"—",IF(ISNUMBER(%s),%s,"— (no date)"))' % (hc, IX("B"), IX("B")),
-            '=IF(%s=0,"—",IF(ISNUMBER(%s),TEXT(%s,"0.000")&" kg","— (usage not entered)"))' % (hc, IX("I"), IX("I")),
+            '=IF(%s=0,"—",IF(ISNUMBER(%s),TEXT(%s,"0.00")&" kg","— (usage not entered)"))' % (hc, IX("I"), IX("I")),
             '=IF(%s=0,"—",IF(%s="","—",%s))' % (hc, IX("Q"), IX("Q")),
             '=IF(%s=0,"—",IF(%s="","— empty —",%s))' % (hc, IX("N"), IX("N")),
             '=IF(%s=0,"—",IF(%s="","— empty —",%s))' % (hc, IX("O"), IX("O")),
-            '=IF(%s=0,"—",TEXT(%s,"0.000")&" kg"&IF(%s="",""," ("&%s&")"))' % (hc, IX(L.col["fAft"]), fk[0], lots),
-            '=IF(%s=0,"—",TEXT(%s,"0.000")&" kg")' % (hc, IX(L.col["mL"])),
+            '=IF(%s=0,"—",TEXT(%s,"0.00")&" kg"&IF(%s="",""," ("&%s&")"))' % (hc, IX(L.col["fAft"]), fk[0], lots),
+            '=IF(%s=0,"—",TEXT(%s,"0.00")&" kg")' % (hc, IX(L.col["mL"])),
         ]
+        # hidden numeric helpers (column I) drive the traffic-light colours of slot 1 / slot 2 / powder on machine
+        for i, name in ((4, "lf1"), (5, "lf2"), (7, "mL")):
+            ws["I%d" % (base + i)] = '=IF(%s=0,"",%s)' % (hc, IX(L.col[name]))
+            ws["I%d" % (base + i)].number_format = "0.00"
+        label_fill = FILL("DDEBF7" if sheet == "Old P110" else "DDF0EF")
         for i, (lab, f) in enumerate(zip(labels, fields)):
             r = base + i
             ws["A%d" % r] = lab
-            ws["A%d" % r].font, ws["A%d" % r].fill, ws["A%d" % r].border = F_BOLD, P_LIGHT, BORDER
+            ws["A%d" % r].font = Font(name=ARIAL, size=10, bold=True, color=mc)
+            ws["A%d" % r].fill, ws["A%d" % r].border = label_fill, BORDER
+            ws["A%d" % r].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+            for col in "BCDEF":
+                ws["%s%d" % (col, r)].border = BORDER
             ws["B%d" % r] = f
-            ws["B%d" % r].font = Font(name=ARIAL, size=11, bold=True)
-            ws["B%d" % r].alignment = LEFT
-            ws["B%d" % r].border = BORDER
+            ws["B%d" % r].font = Font(name=ARIAL, size=12 if i in (0, 7) else 11, bold=True)
+            ws["B%d" % r].alignment = Alignment(horizontal="left", vertical="center", indent=1)
             if i == 1:
                 ws["B%d" % r].number_format = DATE
             ws.merge_cells("B%d:F%d" % (r, r))
+            ws.row_dimensions[r].height = 22
+        for i in (4, 5, 7):
+            r = base + i
+            cf = "B%d:F%d" % (r, r)
+            ws.conditional_formatting.add(cf, FormulaRule(formula=["AND(ISNUMBER($I%d),$I%d<=0.0005)" % (r, r)], fill=RED, font=F_RED, stopIfTrue=True))
+            ws.conditional_formatting.add(cf, FormulaRule(formula=["AND(ISNUMBER($I%d),$I%d<Settings!$B$3)" % (r, r)], fill=AMBER, font=F_AMBER, stopIfTrue=True))
+            ws.conditional_formatting.add(cf, FormulaRule(formula=["ISNUMBER($I%d)" % r], fill=GREEN, font=F_GREEN, stopIfTrue=True))
     ws.column_dimensions["A"].width = 28
     ws.column_dimensions["B"].width = 20
     for c in "CDEF":
         ws.column_dimensions[c].width = 14
     ws.column_dimensions["H"].hidden = True
+    ws.column_dimensions["I"].hidden = True
     ws.protection.sheet = True
 
 
+KG_HELPERS = (["wA", "wB", "s0", "pA", "pB", "nd0", "fAft", "nS", "av1", "av2", "tF", "nR", "tS", "su1", "su2", "noB",
+               "d1", "d2", "lf1", "lf2", "mL", "ledMin"]
+              + ["%s%d" % (p, j) for p in ("SQ", "tk", "nd", "rq", "FQ") for j in range(1, 5)]
+              + ["DQ%d" % j for j in range(1, 7)])
 CHECK_ROW0 = 6
 HDR_INT_COL = "S"   # machine sheets: S1 = ledger header / opening-balance integrity (0 = intact)
 
@@ -799,7 +856,7 @@ def checks_list(nrows):
 
 
 def build_checks(ws, nrows):
-    _title(ws, "Checks — the workbook's safety net (fix every ERROR; review every WARN)", 5, P_GREY, 13)
+    _title(ws, "Checks — the workbook's safety net (fix every ERROR; review every WARN)", 5, FILL("263238"), 15, 34)
     ws["A2"] = ("Data validation can be bypassed by pasting, so this sheet re-checks every input. "
                 "Row-level messages also appear in column R of each machine sheet.")
     ws["A2"].font = F_HELP
@@ -810,39 +867,48 @@ def build_checks(ws, nrows):
     errs = 'SUMIF($A$%d:$A$%d,"ERROR",$C$%d:$C$%d)' % (r0, r1, r0, r1)
     warns = 'SUMIF($A$%d:$A$%d,"WARN",$C$%d:$C$%d)' % (r0, r1, r0, r1)
     ws["A3"] = '=IF(%s+%s=0,"ALL CHECKS PASS",%s&" ERRORS / "&%s&" WARNINGS")' % (errs, warns, errs, warns)
-    ws["A3"].font = Font(name=ARIAL, size=16, bold=True)
+    ws["A3"].font = Font(name=ARIAL, size=18, bold=True)
     ws["A3"].alignment = CENTER
     ws.merge_cells("A3:E3")
-    ws.row_dimensions[3].height = 32
+    ws.row_dimensions[3].height = 40
     ws.conditional_formatting.add("A3:E3", FormulaRule(formula=['$A$3="ALL CHECKS PASS"'], fill=GREEN, font=F_GREEN, stopIfTrue=True))
     ws.conditional_formatting.add("A3:E3", FormulaRule(formula=['LEFT($A$3,2)="0 "'], fill=AMBER, font=F_AMBER, stopIfTrue=True))
     ws.conditional_formatting.add("A3:E3", FormulaRule(formula=['$A$3<>""'], fill=RED, font=F_RED, stopIfTrue=True))
     for i, t in enumerate(["Severity", "Check", "Count", "First occurrence", "How to fix"]):
-        _hdr(ws.cell(5, i + 1), t)
+        _hdr(ws.cell(5, i + 1), t, FILL("44546A"))
+    ws.row_dimensions[5].height = 22
     for i, (sev, label, cnt, first, fix) in enumerate(items):
         r = r0 + i
         for c, v in zip("ABCDE", (sev, label, cnt, first, fix)):
             ws["%s%d" % (c, r)] = v
             ws["%s%d" % (c, r)].font = F_TXT
             ws["%s%d" % (c, r)].border = BORDER
-            ws["%s%d" % (c, r)].alignment = LEFTW
-        ws["C%d" % r].alignment = RIGHT
+            ws["%s%d" % (c, r)].alignment = Alignment(horizontal="left", vertical="center")
+        ws["A%d" % r].alignment = CENTER
+        ws["A%d" % r].font = Font(name=ARIAL, size=9, bold=True, color="9C0006" if sev == "ERROR" else "9C5700")
+        ws["C%d" % r].alignment = CENTER
+        ws["C%d" % r].font = F_BOLD
+        ws.row_dimensions[r].height = 18
     rng = "A%d:E%d" % (r0, r1)
     ws.conditional_formatting.add(rng, FormulaRule(formula=['AND($A%d="ERROR",$C%d>0)' % (r0, r0)], fill=RED, stopIfTrue=True))
     ws.conditional_formatting.add(rng, FormulaRule(formula=['AND($A%d="WARN",$C%d>0)' % (r0, r0)], fill=AMBER, stopIfTrue=True))
-    ws.conditional_formatting.add(rng, FormulaRule(formula=["$C%d=0" % r0], fill=GREEN))
-    for c, w in zip("ABCDE", (10, 52, 8, 70, 70)):
+    ws.conditional_formatting.add(rng, FormulaRule(formula=["$C%d=0" % r0], fill=PALE_GREEN, font=F_MUTED))
+    for c, w in zip("ABCDE", (11, 58, 8, 62, 96)):
         ws.column_dimensions[c].width = w
     ws.freeze_panes = "A6"
     ws.protection.sheet = True
 
 
 def _text_sheet(ws, title, blocks, widths):
-    _title(ws, title, len(widths), P_GREY, 13)
+    _title(ws, title, len(widths), FILL("44546A"), 15, 34)
     r = 3
     for block in blocks:
         if block[0] == "h":
-            _hdr(ws.cell(r, 1), block[1], P_BLUE)
+            qa = "QA REVIEW" in block[1]
+            for i in range(len(widths)):
+                _hdr(ws.cell(r, i + 1), block[1] if i == 0 else None, FILL("C00000" if qa else "2E75B6"),
+                     Font(name=ARIAL, size=10, bold=True, color="FFFFFF"))
+            ws.row_dimensions[r].height = 22
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=len(widths))
             r += 1
         elif block[0] == "p":
@@ -855,10 +921,12 @@ def _text_sheet(ws, title, blocks, widths):
             for i, t in enumerate(block[1]):
                 _hdr(ws.cell(r, i + 1), t, P_LIGHT, F_GRP)
             r += 1
-            for row in block[2]:
+            for k, row in enumerate(block[2]):
                 for i, v in enumerate(row):
                     c = ws.cell(r, i + 1, v)
                     c.font, c.alignment, c.border = F_TXT, LEFTW, BORDER
+                    if k % 2:
+                        c.fill = FILL("F7F9FC")
                 r += 1
         elif block[0] == "sp":
             r += 1
@@ -904,6 +972,9 @@ def build_workbook(data=None, nrows=1000, change_log=None):
     build_lists(sh["Lists"])
     for ws in wb.worksheets:
         ws.sheet_view.zoomScale = 100
+        ws.sheet_view.showGridLines = False
+        if ws.title in TAB_COLOR:
+            ws.sheet_properties.tabColor = TAB_COLOR[ws.title]
     wb.active = 0
     for ws in wb.worksheets:
         ws.sheet_view.tabSelected = ws.title == "Checks"
